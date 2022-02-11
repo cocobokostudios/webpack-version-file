@@ -1,7 +1,11 @@
+//@ts-check
+/** @typedef {import("webpack/lib/Compiler.js")} WebpackCompiler */
+
 import chalk from 'chalk';
 import ejs from 'ejs';
 import fs from 'fs';
 import path from 'path';
+import { Compiler } from 'webpack';
 
 const DEFAULT_OPTIONS = {
   verbose: false,
@@ -45,44 +49,52 @@ class VersionFile {
     );
   }
 
-  apply() {
-    // If there's both an inline template and a template file defined, favour the template file
-    let template;
+  /**
+   * @param {Compiler} compiler 
+   */
+  apply(compiler) {
+    //
+    compiler.hooks.done.tap(
+      "Webpack Version File",
+      () => {
+        // If there's both an inline template and a template file defined, favour the template file
+        let template;
 
-    if (this.options.template) {
-      template = readFile(this.options.template);
-    } else {
-      template = this.options.templateString;
-    }
+        if (this.options.template) {
+          template = readFile(this.options.template);
+        } else {
+          template = this.options.templateString;
+        }
 
-    // Get all the variables being used in the template,
-    // and make sure the corresponding values have been provided in `this.data`
-    const dataKeys = Object.keys(this.data);
-    const templateVariablesRegex = /<%= (.+?) %>/g;
-    const regexMatches = template.match(templateVariablesRegex);
-    let variablesNotPopulated = [];
-    if (regexMatches) {
-      variablesNotPopulated = regexMatches
-        .map(variable => variable.replace('<%=', ''))
-        .map(variable => variable.replace('%>', ''))
-        .map(variable => variable.trim())
-        .map(getRootVariableForNestedObjects)
-        .filter(variable => dataKeys.indexOf(variable) === -1);
-    }
+        // Get all the variables being used in the template,
+        // and make sure the corresponding values have been provided in `this.data`
+        const dataKeys = Object.keys(this.data);
+        const templateVariablesRegex = /<%= (.+?) %>/g;
+        const regexMatches = template.match(templateVariablesRegex);
+        let variablesNotPopulated = [];
+        if (regexMatches) {
+          variablesNotPopulated = regexMatches
+            .map(variable => variable.replace('<%=', ''))
+            .map(variable => variable.replace('%>', ''))
+            .map(variable => variable.trim())
+            .map(getRootVariableForNestedObjects)
+            .filter(variable => dataKeys.indexOf(variable) === -1);
+        }
 
-    if (variablesNotPopulated.length > 0) {
-      const variableCollocation = variablesNotPopulated.length > 1 ? 'variables' : 'variable';
-      const haveNotCollocation = variablesNotPopulated.length > 1 ? `haven't` : `hasn't`;
-      const listOfVariables = variablesNotPopulated.join(', ');
+        if (variablesNotPopulated.length > 0) {
+          const variableCollocation = variablesNotPopulated.length > 1 ? 'variables' : 'variable';
+          const haveNotCollocation = variablesNotPopulated.length > 1 ? `haven't` : `hasn't`;
+          const listOfVariables = variablesNotPopulated.join(', ');
 
-      throw new Error(`You are using the following ${variableCollocation} which ${haveNotCollocation} been populated: ${listOfVariables}`);
-    }
+          throw new Error(`You are using the following ${variableCollocation} which ${haveNotCollocation} been populated: ${listOfVariables}`);
+        }
 
-    // Get the parsed template
-    const content = render(template, this.data);
+        // Get the parsed template
+        const content = render(template, this.data);
 
-    // Write file to disk
-    writeFile(this.options.output, content, this.options.verbose);
+        // Write file to disk
+        writeFile(this.options.output, content, this.options.verbose);
+      });
   }
 }
 
@@ -91,7 +103,7 @@ class VersionFile {
  *
  * @param   {string} template Template string used by EJS
  * @param   {object} data     Data object to hydrate the template with
- * @returns {string}          Rendered template
+ * @returns {*}          Rendered template
  */
 function render(template, data) {
   return ejs.render(template, data);
@@ -116,7 +128,7 @@ function readFile(path) {
 /**
  * Writes a file to disk with the provided content
  *
- * @param {string} path    Path to the file we want to create
+ * @param {string} pathToFile    Path to the file we want to create
  * @param {string} content File contents
  */
 function writeFile(pathToFile, content, verbose) {
@@ -130,7 +142,7 @@ function writeFile(pathToFile, content, verbose) {
   // Try to write file to disk to the given location
   fs.writeFile(pathToFile, content, { flag: 'w' }, (error) => {
     if (error) {
-      throw new Error(error);
+      throw new Error(error.message);
     }
 
     // Log success message to the console if in verbose mode only
@@ -147,7 +159,6 @@ function writeFile(pathToFile, content, verbose) {
  * this function returns the name of the original variable ignoring the nesting.
  *
  * @param {string} variable   Variable string, can be a nested object or array
- * @param {string}            Name of the variable w/o nesting
  */
 function getRootVariableForNestedObjects(variable) {
   const indexOfFirstDot = variable.indexOf('.');
